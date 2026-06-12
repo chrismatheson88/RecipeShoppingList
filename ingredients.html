@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <title>Ingredients</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="manifest" href="manifest.json" />
+  <style>
+    .filter-row input {
+      width: 100%;
+      padding: 13px 16px;
+      border: 2px solid #E0E0E0;
+      border-radius: var(--radius);
+      font-size: 16px;
+      outline: none;
+      background: var(--card);
+    }
+    .filter-row input:focus { border-color: var(--purple, #7E57C2); }
+
+    /* ── Ingredient card ── */
+    .idef-card {
+      background: var(--card);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+    .idef-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 16px;
+      cursor: pointer;
+    }
+    .idef-name {
+      flex: 1;
+      font-size: 17px;
+      font-weight: 700;
+    }
+    .idef-used {
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .idef-toggle {
+      font-size: 20px;
+      color: var(--muted);
+      transition: transform 0.2s;
+    }
+    .idef-card.open .idef-toggle { transform: rotate(180deg); }
+
+    .idef-body {
+      display: none;
+      padding: 0 16px 16px;
+      border-top: 1px solid #F0F0F0;
+      padding-top: 14px;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .idef-card.open .idef-body { display: flex; }
+
+    /* Units checkboxes */
+    .units-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .unit-chip {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border: 2px solid #E0E0E0;
+      border-radius: 20px;
+      font-size: 14px;
+      cursor: pointer;
+      user-select: none;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .unit-chip input { display: none; }
+    .unit-chip.selected {
+      border-color: var(--purple, #7E57C2);
+      background: #EDE7F6;
+      color: #4527A0;
+      font-weight: 600;
+    }
+
+    /* Purchase quantities */
+    .pq-list { display: flex; flex-direction: column; gap: 8px; }
+    .pq-row {
+      display: grid;
+      grid-template-columns: 80px 1fr auto;
+      gap: 6px;
+      align-items: center;
+    }
+    .pq-row input[type=number],
+    .pq-row select {
+      padding: 9px 10px;
+      border: 2px solid #E0E0E0;
+      border-radius: 10px;
+      font-size: 15px;
+      font-family: inherit;
+      outline: none;
+      min-width: 0;
+      background: var(--card);
+    }
+    .pq-row input:focus,
+    .pq-row select:focus { border-color: var(--purple, #7E57C2); }
+
+    .add-pq-btn {
+      background: none;
+      border: 2px dashed #D1C4E9;
+      border-radius: 10px;
+      color: #512DA8;
+      font-size: 14px;
+      font-weight: 600;
+      padding: 8px 14px;
+      cursor: pointer;
+      width: 100%;
+    }
+    .add-unit-row {
+      display: flex;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .add-unit-row input {
+      flex: 1;
+      padding: 7px 12px;
+      border: 2px solid #E0E0E0;
+      border-radius: 20px;
+      font-size: 14px;
+      outline: none;
+      background: var(--card);
+    }
+    .add-unit-row input:focus { border-color: var(--purple, #7E57C2); }
+    .add-unit-row button {
+      padding: 7px 14px;
+      background: var(--purple, #7E57C2);
+      color: white;
+      border: none;
+      border-radius: 20px;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .unit-chip .remove-unit {
+      font-size: 11px;
+      margin-left: 2px;
+      opacity: 0.6;
+    }
+    /* Global unit manager */
+    .unit-manager {
+      background: var(--card);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .idef-name-input {
+      width: 100%;
+      padding: 10px 12px;
+      border: 2px solid #E0E0E0;
+      border-radius: 10px;
+      font-size: 15px;
+      outline: none;
+      background: var(--card);
+    }
+    .idef-name-input:focus { border-color: var(--purple, #7E57C2); }
+  </style>
+</head>
+<body>
+  <header>
+    <a href="index.html" class="back-btn">‹</a>
+    <h1>🥕 Ingredients</h1>
+  </header>
+
+  <main class="page">
+    <div class="unit-manager">
+      <label class="section-label">Global units</label>
+      <div class="units-grid" id="global-units-grid"></div>
+      <div class="add-unit-row">
+        <input type="text" id="new-global-unit" placeholder="New unit…"
+          onkeydown="if(event.key==='Enter'){addGlobalUnit();event.preventDefault();}" />
+        <button onclick="addGlobalUnit()">Add</button>
+      </div>
+    </div>
+    <div class="filter-row">
+      <input id="search" type="text" placeholder="Search ingredients…" oninput="renderFiltered()" />
+    </div>
+    <div class="card-list" id="ing-list"></div>
+  </main>
+
+  <script src="storage.js"></script>
+  <script>
+    const PRESET_UNITS = ['grams', 'cups', 'items', 'slices', 'tsp', 'tbsp'];
+    let customUnits = [];   // loaded from server
+    let allIngredients = [];
+    const ingredientSaveTimers = new Map();
+
+    function allUnits() {
+      return [...PRESET_UNITS, ...customUnits];
+    }
+
+    async function loadAll() {
+      const [ingredients, units] = await Promise.all([
+        AppStore.getIngredients(),
+        AppStore.getUnits(),
+      ]);
+      allIngredients = ingredients;
+      customUnits = units;
+      allIngredients.sort((a, b) => a.name.localeCompare(b.name));
+      renderGlobalUnits();
+      renderFiltered();
+    }
+
+    // ── Global unit manager ────────────────────────────────────────────
+
+    function renderGlobalUnits() {
+      const grid = document.getElementById('global-units-grid');
+      const all = allUnits();
+      grid.innerHTML = all.map(u => {
+        const isCustom = !PRESET_UNITS.includes(u);
+        const removeBtn = isCustom
+          ? `<span class="remove-unit" onclick="removeGlobalUnit('${escapeJs(u)}',event)">✕</span>`
+          : '';
+        return `<span class="unit-chip selected" style="cursor:default">${escapeHtml(u)}${removeBtn}</span>`;
+      }).join('');
+    }
+
+    async function saveGlobalUnits() {
+      await AppStore.setUnits(customUnits);
+    }
+
+    function addGlobalUnit() {
+      const input = document.getElementById('new-global-unit');
+      const val = input.value.trim();
+      if (!val) return;
+      if (allUnits().map(u => u.toLowerCase()).includes(val.toLowerCase())) {
+        input.value = '';
+        return;
+      }
+      customUnits.push(val);
+      input.value = '';
+      saveGlobalUnits();
+      renderGlobalUnits();
+      // Add chip to every open ingredient card
+      document.querySelectorAll('.idef-card').forEach((card, i) => {
+        const grid = document.getElementById(`units-${i}`);
+        if (grid) grid.insertAdjacentHTML('beforeend', unitChip(i, val, false));
+      });
+    }
+
+    function removeGlobalUnit(unit, event) {
+      event.stopPropagation();
+      customUnits = customUnits.filter(u => u !== unit);
+      saveGlobalUnits();
+      renderGlobalUnits();
+      // Remove chip from every ingredient card
+      document.querySelectorAll('.idef-card').forEach((card, i) => {
+        const grid = document.getElementById(`units-${i}`);
+        if (!grid) return;
+        grid.querySelectorAll('.unit-chip input').forEach(inp => {
+          if (inp.value === unit) inp.closest('.unit-chip').remove();
+        });
+        refreshPqUnitDropdowns(i);
+      });
+    }
+
+    function renderFiltered() {
+      const query = document.getElementById('search').value.trim().toLowerCase();
+      const filtered = query
+        ? allIngredients.filter(i => i.name.toLowerCase().includes(query))
+        : allIngredients;
+      render(filtered);
+    }
+
+    function render(ingredients) {
+      const list = document.getElementById('ing-list');
+      list.innerHTML = '';
+
+      if (ingredients.length === 0) {
+        list.innerHTML = `
+          <div class="empty">
+            <span class="empty-icon">🥕</span>
+            <p>No ingredients found.<br/>Add some via a recipe!</p>
+          </div>`;
+        return;
+      }
+
+      ingredients.forEach((ing, i) => {
+        const card = document.createElement('div');
+        card.className = 'idef-card';
+        card.id = `idef-${i}`;
+
+        const selectedUnits = new Set(ing.units || []);
+        const pqs = ing.purchaseQuantities || [];
+
+        card.innerHTML = `
+          <div class="idef-header" onclick="toggleCard(${i})">
+            <div>
+              <div class="idef-name">${escapeHtml(ing.name)}</div>
+              <div class="idef-used">Used in: ${escapeHtml(ing.usedIn.join(', '))}</div>
+            </div>
+            <span class="idef-toggle">⌄</span>
+          </div>
+          <div class="idef-body">
+            <div>
+              <label class="section-label" style="margin-bottom:8px">Ingredient name</label>
+              <input id="name-${i}" class="idef-name-input" type="text" value="${escapeHtml(ing.name)}" oninput="scheduleSaveDef(${i})" onchange="scheduleSaveDef(${i},0)" onblur="scheduleSaveDef(${i},0)" />
+            </div>
+            <div>
+              <label class="section-label" style="margin-bottom:8px">Available units</label>
+              <div class="units-grid" id="units-${i}">
+                ${allUnits().map(u => unitChip(i, u, selectedUnits.has(u))).join('')}
+              </div>
+            </div>
+            <div>
+              <label class="section-label" style="margin-bottom:8px">Purchase quantities</label>
+              <div class="pq-list" id="pq-list-${i}">
+                ${pqs.map((pq, j) => pqRow(i, j, pq, [...selectedUnits])).join('')}
+              </div>
+              <button class="add-pq-btn" onclick="addPqRow(${i})">+ Add purchase quantity</button>
+            </div>
+          </div>`;
+        list.appendChild(card);
+      });
+    }
+
+    function pqRow(i, j, pq, units) {
+      pq = pq || { qty: '', unit: units[0] || '' };
+      const opts = units.length
+        ? units.map(u => `<option value="${u}" ${pq.unit === u ? 'selected' : ''}>${u}</option>`).join('')
+        : `<option value="${pq.unit}">${pq.unit || '—'}</option>`;
+      return `<div class="pq-row" id="pq-${i}-${j}">
+        <input type="number" min="0" step="any" placeholder="Qty" class="pq-qty" value="${escapeHtml(String(pq.qty || ''))}" oninput="scheduleSaveDef(${i})" />
+        <select class="pq-unit" onchange="scheduleSaveDef(${i})">${opts}</select>
+        <button class="delete-btn" onclick="deletePqRow(${i},${j})">✕</button>
+      </div>`;
+    }
+
+    function unitChip(i, u, selected) {
+      return `<label class="unit-chip${selected ? ' selected' : ''}" onclick="toggleUnit(${i},this,event)">
+        <input type="checkbox" value="${escapeHtml(u)}" ${selected ? 'checked' : ''} />
+        ${escapeHtml(u)}
+      </label>`;
+    }
+
+    function toggleCard(i) {
+      document.getElementById(`idef-${i}`).classList.toggle('open');
+    }
+
+    function toggleUnit(i, label, event) {
+      event.preventDefault();
+      label.classList.toggle('selected');
+      label.querySelector('input').checked = label.classList.contains('selected');
+      refreshPqUnitDropdowns(i);
+      scheduleSaveDef(i);
+    }
+
+    function getSelectedUnits(i) {
+      return Array.from(document.querySelectorAll(`#units-${i} .unit-chip.selected input`))
+        .map(inp => inp.value);
+    }
+
+    function refreshPqUnitDropdowns(i) {
+      const units = getSelectedUnits(i);
+      document.querySelectorAll(`#pq-list-${i} .pq-row`).forEach(row => {
+        const sel = row.querySelector('.pq-unit');
+        const current = sel.value;
+        sel.innerHTML = units.length
+          ? units.map(u => `<option value="${u}" ${current === u ? 'selected' : ''}>${u}</option>`).join('')
+          : `<option value="">—</option>`;
+      });
+    }
+
+    function collectPqRows(i) {
+      return Array.from(document.querySelectorAll(`#pq-list-${i} .pq-row`)).map(row => ({
+        qty: row.querySelector('.pq-qty').value,
+        unit: row.querySelector('.pq-unit').value,
+      }));
+    }
+
+    function addPqRow(i) {
+      const units = getSelectedUnits(i);
+      const pqs = collectPqRows(i);
+      pqs.push({ qty: '', unit: units[0] || '' });
+      const container = document.getElementById(`pq-list-${i}`);
+      container.innerHTML = pqs.map((pq, j) => pqRow(i, j, pq, units)).join('');
+      scheduleSaveDef(i);
+    }
+
+    function deletePqRow(i, j) {
+      const units = getSelectedUnits(i);
+      const pqs = collectPqRows(i);
+      pqs.splice(j, 1);
+      const container = document.getElementById(`pq-list-${i}`);
+      container.innerHTML = pqs.map((pq, k) => pqRow(i, k, pq, units)).join('');
+      scheduleSaveDef(i);
+    }
+
+    function scheduleSaveDef(i, delay = 350) {
+      if (ingredientSaveTimers.has(i)) clearTimeout(ingredientSaveTimers.get(i));
+      const timer = setTimeout(() => {
+        ingredientSaveTimers.delete(i);
+        saveDef(i);
+      }, delay);
+      ingredientSaveTimers.set(i, timer);
+    }
+
+    async function saveDef(i) {
+      const query = document.getElementById('search').value.trim().toLowerCase();
+      const filtered = query
+        ? allIngredients.filter(x => x.name.toLowerCase().includes(query))
+        : allIngredients;
+      const ingredient = filtered[i];
+      if (!ingredient) return;
+
+      const oldName = ingredient.name;
+      const newName = capitalizeIngredientName(document.getElementById(`name-${i}`).value);
+      if (!newName) return;
+
+      if (newName.toLowerCase() !== oldName.toLowerCase()) {
+        await AppStore.renameIngredient(oldName, newName);
+        ingredient.name = newName;
+      }
+
+      const units = getSelectedUnits(i);
+      const purchaseQuantities = collectPqRows(i).filter(pq => pq.qty !== '' && pq.unit);
+
+      await AppStore.saveIngredientDef(ingredient.name, { units, purchaseQuantities });
+
+      // Update local state
+      ingredient.units = units;
+      ingredient.purchaseQuantities = purchaseQuantities;
+      ingredient.name = newName;
+
+      const nameInput = document.getElementById(`name-${i}`);
+      if (nameInput) nameInput.value = newName;
+      const nameLabel = document.querySelector(`#idef-${i} .idef-name`);
+      if (nameLabel) nameLabel.textContent = newName;
+    }
+
+    function escapeHtml(str) {
+      return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    function escapeJs(str) {
+      return str.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+    }
+
+    function capitalizeIngredientName(name) {
+      const trimmed = String(name || '').trim();
+      if (!trimmed) return '';
+      return trimmed
+        .toLowerCase()
+        .split(/\s+/)
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' ');
+    }
+
+    loadAll();
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js');
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <title>Recipes</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="manifest" href="manifest.json" />
+</head>
+<body>
+  <header>
+    <a href="index.html" class="back-btn">‹</a>
+    <h1>📖 Recipes</h1>
+  </header>
+
+  <main class="page">
+    <div class="add-row">
+      <input id="recipe-input" type="text" placeholder="Add a recipe name…" />
+      <button class="recipes" onclick="addRecipe()">Add</button>
+    </div>
+    <div class="card-list" id="recipe-list"></div>
+  </main>
+
+  <script src="storage.js"></script>
+  <script>
+    // ── State ─────────────────────────────────────────────────────────────────
+    let recipes = [];
+    let ingredientDefs = {}; // keyed by lowercase name
+    const PRESET_UNITS = ['grams','cups','items','slices','tsp','tbsp'];
+    let customUnits = [];
+    const recipeSaveTimers = new Map();
+
+    function allUnits() {
+      return [...PRESET_UNITS, ...customUnits];
+    }
+
+    async function loadFromServer() {
+      const [loadedRecipes, defs, units] = await Promise.all([
+        AppStore.getRecipes(),
+        AppStore.getIngredients(),
+        AppStore.getUnits(),
+      ]);
+      recipes = loadedRecipes;
+      customUnits = units;
+      ingredientDefs = {};
+      defs.forEach(d => {
+        if (d.units && d.units.length) ingredientDefs[d.name.toLowerCase()] = d.units;
+      });
+      render();
+    }
+
+    async function saveToServer() {
+      await AppStore.setRecipes(recipes);
+    }
+
+    function render() {
+      const list = document.getElementById('recipe-list');
+      list.innerHTML = '';
+
+      if (recipes.length === 0) {
+        list.innerHTML = `
+          <div class="empty">
+            <span class="empty-icon">📖</span>
+            <p>No recipes yet.<br/>Add one above!</p>
+          </div>`;
+        return;
+      }
+
+      recipes.forEach((r, i) => {
+        const ingredients = Array.isArray(r.ingredients) ? r.ingredients : [];
+        const card = document.createElement('div');
+        card.className = 'recipe-card';
+        card.innerHTML = `
+          <div class="recipe-header" onclick="toggleRecipe(${i})">
+            <span class="recipe-emoji">${randomEmoji(i)}</span>
+            <span class="recipe-name">${escapeHtml(r.name)}</span>
+            <button class="delete-btn" onclick="deleteRecipe(event,${i})">🗑</button>
+            <span class="recipe-toggle">⌄</span>
+          </div>
+          <div class="recipe-body">
+            <label class="section-label">🥕 Ingredients</label>
+            <div class="ing-list" id="ing-list-${i}">
+              ${ingredients.map((ing, j) => ingredientRow(i, j, ing)).join('')}
+            </div>
+            <button class="add-ing-btn" onclick="addIngredientRow(${i})">+ Add ingredient</button>
+            <label class="section-label" style="margin-top:16px">📋 Steps</label>
+            <textarea id="steps-${i}" placeholder="e.g. 1. Preheat oven to 180°C…" oninput="scheduleRecipeSave(${i})">${escapeHtml(r.steps || '')}</textarea>
+          </div>`;
+        list.appendChild(card);
+      });
+    }
+
+    function toggleRecipe(i) {
+      document.querySelectorAll('.recipe-card')[i].classList.toggle('open');
+    }
+
+    function addRecipe() {
+      const input = document.getElementById('recipe-input');
+      const name = input.value.trim();
+      if (!name) return;
+      recipes.push({ name, ingredients: [], steps: '' });
+      saveToServer();
+      input.value = '';
+      render();
+    }
+
+    function deleteRecipe(e, i) {
+      e.stopPropagation();
+      recipes.splice(i, 1);
+      saveToServer();
+      render();
+    }
+
+    function unitsForIngredient(name) {
+      const def = ingredientDefs[(name || '').toLowerCase()];
+      return (def && def.length) ? def : allUnits();
+    }
+
+    function ingredientRow(i, j, ing) {
+      ing = ing || { qty: '', unit: '', name: '' };
+      const units = unitsForIngredient(ing.name);
+      const currentUnit = units.includes(ing.unit) ? ing.unit : units[0];
+      const summary = formatIngredientSummary(ing);
+      return `<div class="ing-row" id="ing-${i}-${j}" data-original-name="${escapeHtml(ing.name || '')}">
+        <button type="button" class="ing-summary" onclick="beginEditIngredient(${i}, ${j})">
+          <span class="ing-summary-text">${escapeHtml(summary)}</span>
+        </button>
+        <div class="ing-editor">
+          <input class="ing-qty" type="number" min="0" step="any" placeholder="Qty" value="${escapeHtml(String(ing.qty || ''))}" oninput="scheduleRecipeSave(${i})" />
+          <select class="ing-unit" onchange="scheduleRecipeSave(${i})">${units.map(u => `<option value="${u}" ${currentUnit===u?'selected':''}>${u}</option>`).join('')}</select>
+          <div style="position:relative">
+            <input class="ing-name" type="text" placeholder="Ingredient name" value="${escapeHtml(ing.name || '')}" oninput="showIngredientSuggestions(${i}, ${j});scheduleRecipeSave(${i})" onchange="renameIngredient(this, ${i}, ${j})" onblur="renameIngredient(this, ${i}, ${j})" autocomplete="off" />
+            <div class="ing-suggestions" id="ing-suggestions-${i}-${j}"></div>
+          </div>
+          <button type="button" class="ing-done" onclick="doneEditIngredient(${i}, ${j})">Done</button>
+        </div>
+        <button class="delete-btn" onclick="deleteIngredientRow(${i},${j})">✕</button>
+      </div>`;
+    }
+
+    function formatIngredientSummary(ing) {
+      const qty = String(ing.qty || '').trim();
+      const unit = String(ing.unit || '').trim();
+      const name = capitalizeIngredientName(ing.name || '');
+      const parts = [qty, unit, name].filter(Boolean);
+      return parts.length ? parts.join(' ') : 'Tap to add ingredient details';
+    }
+
+    function beginEditIngredient(i, j) {
+      const row = document.getElementById(`ing-${i}-${j}`);
+      if (!row) return;
+      row.classList.add('editing');
+      const nameInput = row.querySelector('.ing-name');
+      if (nameInput) nameInput.focus();
+    }
+
+    async function doneEditIngredient(i, j) {
+      const row = document.getElementById(`ing-${i}-${j}`);
+      if (!row) return;
+      const nameInput = row.querySelector('.ing-name');
+      if (nameInput) await renameIngredient(nameInput, i, j);
+      const summary = formatIngredientSummary({
+        qty: row.querySelector('.ing-qty').value,
+        unit: row.querySelector('.ing-unit').value,
+        name: row.querySelector('.ing-name').value,
+      });
+      row.querySelector('.ing-summary-text').textContent = summary;
+      row.classList.remove('editing');
+    }
+
+    async function refreshIngredientDefs() {
+      const defs = await AppStore.getIngredients();
+      ingredientDefs = {};
+      defs.forEach(d => {
+        if (d.units && d.units.length) ingredientDefs[d.name.toLowerCase()] = d.units;
+      });
+    }
+
+    async function renameIngredient(nameInput, i, j) {
+      const row = document.getElementById(`ing-${i}-${j}`);
+      if (!row) return;
+
+      const oldName = capitalizeIngredientName(row.getAttribute('data-original-name') || '');
+      const newName = capitalizeIngredientName(nameInput.value);
+      nameInput.value = newName;
+
+      if (oldName && newName && oldName.toLowerCase() !== newName.toLowerCase()) {
+        await AppStore.renameIngredient(oldName, newName);
+        recipes = await AppStore.getRecipes();
+        await refreshIngredientDefs();
+      }
+
+      row.setAttribute('data-original-name', newName);
+      updateUnitDropdown(nameInput, i, j);
+      scheduleRecipeSave(i);
+    }
+
+    function updateUnitDropdown(nameInput, i, j) {
+      nameInput.value = capitalizeIngredientName(nameInput.value);
+      const row = document.getElementById(`ing-${i}-${j}`);
+      if (!row) return;
+      const sel = row.querySelector('.ing-unit');
+      const currentVal = sel.value;
+      const units = unitsForIngredient(nameInput.value);
+      sel.innerHTML = units.map(u => `<option value="${u}" ${u===currentVal?'selected':''}>${u}</option>`).join('');
+      // If the previous selection isn't in the new list, fall back to first option
+      if (!units.includes(currentVal)) sel.value = units[0];
+    }
+
+    function collectIngredients(i) {
+      const rows = document.querySelectorAll(`#ing-list-${i} .ing-row`);
+      recipes[i].ingredients = Array.from(rows).map(row => ({
+        qty:  row.querySelector('.ing-qty').value,
+        unit: row.querySelector('.ing-unit').value,
+        name: capitalizeIngredientName(row.querySelector('.ing-name').value),
+      }));
+    }
+
+    function capitalizeIngredientName(name) {
+      const trimmed = String(name || '').trim();
+      if (!trimmed) return '';
+      return trimmed
+        .toLowerCase()
+        .split(/\s+/)
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' ');
+    }
+
+    function getAllIngredientNames() {
+      return Object.keys(ingredientDefs).map(k => {
+        return k.split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+      }).sort();
+    }
+
+    function findIngredientMatches(query) {
+      const q = query.trim().toLowerCase();
+      if (!q) return getAllIngredientNames().slice(0, 15);
+      return getAllIngredientNames()
+        .filter(name => name.toLowerCase().includes(q))
+        .slice(0, 15);
+    }
+
+    function showIngredientSuggestions(i, j) {
+      const row = document.getElementById(`ing-${i}-${j}`);
+      if (!row) return;
+      const nameInput = row.querySelector('.ing-name');
+      const suggestionsDiv = document.getElementById(`ing-suggestions-${i}-${j}`);
+      if (!nameInput || !suggestionsDiv) return;
+
+      const matches = findIngredientMatches(nameInput.value);
+      suggestionsDiv.innerHTML = '';
+      if (!matches.length) {
+        suggestionsDiv.style.display = 'none';
+        return;
+      }
+
+      matches.forEach(name => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'ing-suggestion-item';
+        btn.textContent = name;
+        btn.onclick = () => selectIngredientSuggestion(i, j, name);
+        suggestionsDiv.appendChild(btn);
+      });
+      suggestionsDiv.style.display = 'block';
+    }
+
+    function selectIngredientSuggestion(i, j, name) {
+      const row = document.getElementById(`ing-${i}-${j}`);
+      if (!row) return;
+      const nameInput = row.querySelector('.ing-name');
+      if (nameInput) {
+        nameInput.value = name;
+        updateUnitDropdown(nameInput, i, j);
+        const suggestionsDiv = document.getElementById(`ing-suggestions-${i}-${j}`);
+        if (suggestionsDiv) suggestionsDiv.style.display = 'none';
+        scheduleRecipeSave(i);
+      }
+    }
+
+    function addIngredientRow(i) {
+      collectIngredients(i);
+      recipes[i].ingredients.push({ qty: '', unit: 'grams', name: '' });
+      saveToServer();
+      render();
+      document.querySelectorAll('.recipe-card')[i].classList.add('open');
+      beginEditIngredient(i, recipes[i].ingredients.length - 1);
+    }
+
+    function deleteIngredientRow(i, j) {
+      collectIngredients(i);
+      recipes[i].ingredients.splice(j, 1);
+      saveToServer();
+      render();
+      document.querySelectorAll('.recipe-card')[i].classList.add('open');
+    }
+
+    async function persistRecipe(i) {
+      collectIngredients(i);
+      recipes[i].steps = document.getElementById(`steps-${i}`).value;
+      await saveToServer();
+    }
+
+    function scheduleRecipeSave(i, delay = 350) {
+      if (recipeSaveTimers.has(i)) clearTimeout(recipeSaveTimers.get(i));
+      const timer = setTimeout(() => {
+        recipeSaveTimers.delete(i);
+        persistRecipe(i);
+      }, delay);
+      recipeSaveTimers.set(i, timer);
+    }
+
+    function randomEmoji(seed) {
+      const emojis = ['🍝','🍜','🥗','🍛','🍕','🥩','🍣','🥘','🍲','🫕','🥞','🍔'];
+      return emojis[seed % emojis.length];
+    }
+
+    function escapeHtml(str) {
+      return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    document.getElementById('recipe-input').addEventListener('keydown', e => {
+      if (e.key === 'Enter') addRecipe();
+    });
+
+    document.addEventListener('click', e => {
+      const allSuggestions = document.querySelectorAll('.ing-suggestions');
+      allSuggestions.forEach(suggestions => {
+        const nameInput = suggestions.parentElement.querySelector('.ing-name');
+        if (!suggestions.contains(e.target) && e.target !== nameInput) {
+          suggestions.style.display = 'none';
+        }
+      });
+    });
+
+    loadFromServer();
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('sw.js');
+      }
+  </script>
+</body>
+</html>

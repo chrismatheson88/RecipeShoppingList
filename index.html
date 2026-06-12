@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="Recipes" />
+  <title>Recipes App</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="manifest" href="manifest.json" />
+</head>
+<body>
+  <main class="home">
+    <div class="home-logo">🍽️</div>
+    <h1 class="home-title">My Kitchen</h1>
+    <p class="home-subtitle">What would you like to open?</p>
+    <div class="home-cards">
+      <a href="recipes.html" class="home-card recipes">
+        <span class="card-icon">📖</span>
+        Recipes
+      </a>
+      <a href="shopping.html" class="home-card shopping">
+        <span class="card-icon">🛒</span>
+        Shopping List
+      </a>
+      <a href="ingredients.html" class="home-card ingredients">
+        <span class="card-icon">🥕</span>
+        Ingredients
+      </a>
+    </div>
+    <section class="data-tools" aria-label="Backup and restore">
+      <h2>Data Backup</h2>
+      <p class="data-tools-note">Export your recipes to a JSON file or import a backup.</p>
+      <div class="data-tools-actions">
+        <button type="button" id="export-data-btn">Export Data</button>
+        <button type="button" id="import-data-btn">Import Data</button>
+      </div>
+      <input id="import-data-file" type="file" accept="application/json" hidden />
+      <p id="data-tools-status" class="data-tools-status" aria-live="polite"></p>
+    </section>
+  </main>
+  <script src="storage.js"></script>
+  <script>
+    function setStatus(message, isError = false) {
+      const status = document.getElementById('data-tools-status');
+      status.textContent = message;
+      status.classList.toggle('error', isError);
+    }
+
+    function makeBackupFilename() {
+      const date = new Date();
+      const pad = n => String(n).padStart(2, '0');
+      return `recipes-backup-${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}.json`;
+    }
+
+    async function exportData() {
+      try {
+        const data = await AppStore.exportData();
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = makeBackupFilename();
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+        setStatus('Export complete. Backup file downloaded.');
+      } catch (_) {
+        setStatus('Export failed. Please try again.', true);
+      }
+    }
+
+    async function handleImportFile(file) {
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const parsed = JSON.parse(text);
+        await AppStore.importData(parsed);
+        setStatus('Import complete. Reloading app data...');
+        setTimeout(() => window.location.reload(), 400);
+      } catch (_) {
+        setStatus('Import failed. Please select a valid JSON backup file.', true);
+      }
+    }
+
+    const exportBtn = document.getElementById('export-data-btn');
+    const importBtn = document.getElementById('import-data-btn');
+    const importInput = document.getElementById('import-data-file');
+
+    exportBtn.addEventListener('click', exportData);
+    importBtn.addEventListener('click', () => importInput.click());
+    importInput.addEventListener('change', async e => {
+      const file = e.target.files && e.target.files[0];
+      await handleImportFile(file);
+      importInput.value = '';
+    });
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js');
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <title>Shopping List</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="manifest" href="manifest.json" />
+</head>
+<body>
+  <header>
+    <a href="index.html" class="back-btn">‹</a>
+    <h1>🛒 Shopping List</h1>
+  </header>
+
+  <main class="page">
+    <div class="add-row">
+      <input id="purchase-search" type="text" placeholder="Search ingredients..." autocomplete="off" />
+      <button class="shopping" onclick="addItem()">Add</button>
+    </div>
+    <div id="purchase-suggestions" class="suggestions"></div>
+    <button class="shopping add-recipe-btn" onclick="showRecipeList()">+ Add Recipe</button>
+    <div id="recipe-suggestions" class="suggestions"></div>
+    <div id="new-item-panel" class="new-item-panel" style="display:none;">
+      <div class="new-item-title">Add New Ingredient Option</div>
+      <div class="new-item-name" id="new-item-name"></div>
+      <div class="new-item-row">
+        <input id="new-item-qty" type="number" min="0" step="any" placeholder="Quantity" />
+        <select id="new-item-unit"></select>
+      </div>
+      <div class="new-item-actions">
+        <button type="button" class="ghost-btn" onclick="cancelNewItemPanel()">Cancel</button>
+      </div>
+    </div>
+    <div style="display:flex; justify-content:flex-end;">
+      <button id="clear-checked" onclick="clearChecked()"
+        style="background:none;border:none;color:#BDBDBD;font-size:13px;cursor:pointer;padding:0 4px;">
+        Clear checked
+      </button>
+    </div>
+    <div class="card-list" id="shop-list"></div>
+  </main>
+
+  <script src="storage.js"></script>
+  <script>
+    // ── State ─────────────────────────────────────────────────────────────────
+    let items = [];
+    let purchaseOptions = [];
+    let selectedOption = '';
+    let recipes = [];
+    let selectedRecipe = '';
+    const PRESET_UNITS = ['grams', 'cups', 'items', 'slices', 'tsp', 'tbsp'];
+    let customUnits = [];
+    let pendingNewIngredient = '';
+    let newItemSaveTimer = null;
+
+    function allUnits() {
+      return [...PRESET_UNITS, ...customUnits];
+    }
+
+    async function loadFromServer() {
+      const [shopping, ingredients, units, loadedRecipes] = await Promise.all([
+        AppStore.getShopping(),
+        AppStore.getIngredients(),
+        AppStore.getUnits(),
+        AppStore.getRecipes(),
+      ]);
+      items = shopping;
+      customUnits = units;
+      recipes = loadedRecipes;
+      purchaseOptions = buildPurchaseOptions(ingredients);
+      await reconcileShoppingItems();
+      renderSuggestions([]);
+      renderRecipeSuggestions([]);
+      renderNewItemUnits();
+      render();
+    }
+
+    function parsePurchaseText(text) {
+      const m = String(text || '').match(/^(\S+)\s+(\S+)\s+(.+)$/);
+      if (!m) return null;
+      return {
+        qty: m[1],
+        unit: m[2],
+        name: m[3],
+        nameKey: m[3].toLowerCase(),
+      };
+    }
+
+    function normalizeUnit(unit) {
+      const normalized = String(unit || '').trim().toLowerCase();
+      const aliases = {
+        g: 'grams',
+        gram: 'grams',
+        grams: 'grams',
+        kg: 'kg',
+        kilogram: 'kg',
+        kilograms: 'kg',
+        item: 'items',
+        items: 'items',
+        slice: 'slices',
+        slices: 'slices',
+        tsp: 'tsp',
+        teaspoon: 'tsp',
+        teaspoons: 'tsp',
+        tbsp: 'tbsp',
+        tablespoon: 'tbsp',
+        tablespoons: 'tbsp',
+      };
+      return aliases[normalized] || normalized;
+    }
+
+    function toComparableQuantity(qty, unit) {
+      const amount = parseFloat(qty);
+      const normalizedUnit = normalizeUnit(unit);
+      if (!Number.isFinite(amount)) return null;
+
+      const conversions = {
+        grams: { family: 'mass', factor: 1, gramEquivalent: 1 },
+        kg: { family: 'mass', factor: 1000, gramEquivalent: 1000 },
+        items: { family: 'count', factor: 1 },
+        slices: { family: 'count', factor: 1 },
+        tsp: { family: 'volume', factor: 1, gramEquivalent: 5 },
+        tbsp: { family: 'volume', factor: 3, gramEquivalent: 15 },
+      };
+
+      const conversion = conversions[normalizedUnit];
+      if (!conversion) {
+        return {
+          family: `raw:${normalizedUnit}`,
+          quantity: amount,
+          unit: normalizedUnit,
+        };
+      }
+
+      const comparable = {
+        family: conversion.family,
+        quantity: amount * conversion.factor,
+        unit: normalizedUnit,
+      };
+
+      // For volume units, also store mass equivalent for cross-family conversion
+      if (conversion.gramEquivalent && conversion.family === 'volume') {
+        comparable.massEquivalent = amount * conversion.gramEquivalent;
+      }
+
+      return comparable;
+    }
+
+    function fromComparableQuantity(quantity, unit) {
+      const normalizedUnit = normalizeUnit(unit);
+      const conversions = {
+        grams: 1,
+        kg: 1000,
+        items: 1,
+        slices: 1,
+        tsp: 1,
+        tbsp: 3,
+      };
+      const factor = conversions[normalizedUnit];
+      if (!factor) return quantity;
+      return quantity / factor;
+    }
+
+    function getCompatibleIngredientOptions(ingredientName, unit) {
+      const required = toComparableQuantity(1, unit);
+      return purchaseOptions
+        .map(text => ({ text, parsed: parsePurchaseText(text) }))
+        .filter(entry => entry.parsed && entry.parsed.name.toLowerCase() === ingredientName.toLowerCase())
+        .map(entry => {
+          const comparable = toComparableQuantity(entry.parsed.qty, entry.parsed.unit);
+          return comparable ? { ...entry, comparable } : null;
+        })
+        .filter(Boolean)
+        .filter(entry => {
+          // Allow volume and mass to mix using gram equivalents
+          if (entry.comparable.family === required?.family) return true;
+          if (required?.family === 'mass' && entry.comparable.family === 'volume' && entry.comparable.massEquivalent !== undefined) return true;
+          if (required?.family === 'volume' && entry.comparable.family === 'mass' && required.massEquivalent !== undefined) return true;
+          return false;
+        });
+    }
+
+    function selectPurchaseItems(requiredQty, requiredUnit, ingredientName) {
+      const required = toComparableQuantity(requiredQty, requiredUnit);
+      if (!required) return [];
+
+      const options = getCompatibleIngredientOptions(ingredientName, requiredUnit)
+        .sort((a, b) => {
+          // Sort by comparable quantity, but use massEquivalent for volume if available
+          const aQty = required?.family === 'mass' && a.comparable.massEquivalent !== undefined ? a.comparable.massEquivalent : a.comparable.quantity;
+          const bQty = required?.family === 'mass' && b.comparable.massEquivalent !== undefined ? b.comparable.massEquivalent : b.comparable.quantity;
+          return aQty - bQty;
+        });
+
+      if (!options.length) return [];
+
+      const requiredComparable = required.massEquivalent !== undefined ? required.massEquivalent : required.quantity;
+
+      // Use single option if it covers needs within 2% tolerance
+      const single = options.find(option => {
+        const optionComparable = required?.family === 'mass' && option.comparable.massEquivalent !== undefined ? option.comparable.massEquivalent : option.comparable.quantity;
+        return optionComparable >= requiredComparable * 0.98;
+      });
+      if (single) return [single.text];
+
+      const descending = [...options].sort((a, b) => {
+        const aQty = required?.family === 'mass' && a.comparable.massEquivalent !== undefined ? a.comparable.massEquivalent : a.comparable.quantity;
+        const bQty = required?.family === 'mass' && b.comparable.massEquivalent !== undefined ? b.comparable.massEquivalent : b.comparable.quantity;
+        return bQty - aQty;
+      });
+      const selection = [];
+      let remaining = requiredComparable;
+      const epsilon = 1e-9;
+
+      while (remaining > epsilon) {
+        const next = descending.find(option => {
+          const optQty = required?.family === 'mass' && option.comparable.massEquivalent !== undefined ? option.comparable.massEquivalent : option.comparable.quantity;
+          return optQty <= remaining + epsilon;
+        }) || descending[descending.length - 1];
+        selection.push(next.text);
+        const nextQty = required?.family === 'mass' && next.comparable.massEquivalent !== undefined ? next.comparable.massEquivalent : next.comparable.quantity;
+        remaining -= nextQty;
+      }
+
+      return selection;
+    }
+
+    function upsertIngredientItems(requiredQty, requiredUnit, ingredientName) {
+      const required = toComparableQuantity(requiredQty, requiredUnit);
+      if (!required) return false;
+
+      const existingIndexes = [];
+      let totalComparableQty = required.quantity;
+      let hasMass = required.family === 'mass';
+      let hasVolume = required.family === 'volume';
+
+      items.forEach((item, index) => {
+        const parsed = parsePurchaseText(item.text);
+        if (!parsed || parsed.name.toLowerCase() !== ingredientName.toLowerCase()) return;
+
+        const comparable = toComparableQuantity(parsed.qty, parsed.unit);
+        if (!comparable) return;
+
+        // Check compatibility
+        if (comparable.family === required.family) {
+          // Same family - always compatible
+          totalComparableQty += comparable.quantity;
+          existingIndexes.push(index);
+        } else if (comparable.family === 'volume' && comparable.massEquivalent !== undefined && required.family === 'mass') {
+          // Volume item mixing with mass - compatible
+          hasVolume = true;
+          totalComparableQty += comparable.quantity;
+          existingIndexes.push(index);
+        } else if (comparable.family === 'mass' && required.family === 'volume' && required.massEquivalent !== undefined) {
+          // Mass item mixing with volume - compatible
+          hasMass = true;
+          totalComparableQty += comparable.quantity;
+          existingIndexes.push(index);
+        }
+      });
+
+      // Determine final unit and qty
+      let finalUnit = requiredUnit;
+      let finalQty = totalComparableQty;
+
+      if (hasMass && hasVolume) {
+        // Mixed mass and volume - convert to grams
+        finalUnit = 'grams';
+        let totalGrams = required.massEquivalent !== undefined ? required.massEquivalent : required.quantity;
+        
+        existingIndexes.forEach(index => {
+          const parsed = parsePurchaseText(items[index].text);
+          const comparable = toComparableQuantity(parsed.qty, parsed.unit);
+          if (comparable.massEquivalent !== undefined) {
+            totalGrams += comparable.massEquivalent;
+          } else if (comparable.family === 'mass') {
+            totalGrams += comparable.quantity;
+          }
+        });
+        finalQty = totalGrams;
+      } else {
+        // Single family - convert from comparable to original unit
+        finalQty = fromComparableQuantity(finalQty, requiredUnit);
+      }
+
+      const selectedItems = selectPurchaseItems(finalQty, finalUnit, ingredientName);
+      if (!selectedItems.length) return false;
+
+      const preservedChecked = existingIndexes.every(index => items[index].checked);
+      items = items.filter((_, index) => !existingIndexes.includes(index));
+      selectedItems.forEach(text => {
+        items.push({ text, checked: existingIndexes.length ? preservedChecked : false });
+      });
+      return true;
+    }
+
+    function buildOptionLookup() {
+      const lookup = {};
+      purchaseOptions.forEach(option => {
+        const parsed = parsePurchaseText(option);
+        if (!parsed) return;
+        if (!lookup[parsed.nameKey]) lookup[parsed.nameKey] = [];
+        lookup[parsed.nameKey].push({
+          text: option,
+          unit: parsed.unit,
+        });
+      });
+      return lookup;
+    }
+
+    async function reconcileShoppingItems() {
+      const lookup = buildOptionLookup();
+      let changed = false;
+
+      items.forEach(item => {
+        const parsed = parsePurchaseText(item.text);
+        if (!parsed) return;
+
+        const options = lookup[parsed.nameKey] || [];
+        if (!options.length) return;
+
+        const exact = options.find(o => o.text.toLowerCase() === item.text.toLowerCase());
+        if (exact) return;
+
+        // Prefer keeping the same unit if still available; otherwise use first option.
+        const replacement = options.find(o => o.unit === parsed.unit) || options[0];
+        if (replacement && replacement.text !== item.text) {
+          item.text = replacement.text;
+          changed = true;
+        }
+      });
+
+      if (changed) {
+        await saveToServer();
+      }
+    }
+
+    async function refreshPurchaseOptions() {
+      const ingredients = await AppStore.getIngredients();
+      purchaseOptions = buildPurchaseOptions(ingredients);
+      await reconcileShoppingItems();
+      const query = document.getElementById('purchase-search').value;
+      if (query.trim()) {
+        renderSuggestions(findMatches(query));
+      } else {
+        renderSuggestions([]);
+      }
+      render();
+    }
+
+    function buildPurchaseOptions(ingredients) {
+      const options = [];
+      ingredients.forEach(ingredient => {
+        const pqs = Array.isArray(ingredient.purchaseQuantities) ? ingredient.purchaseQuantities : [];
+        pqs.forEach(pq => {
+          const qty = String(pq.qty || '').trim();
+          const unit = String(pq.unit || '').trim();
+          if (!qty || !unit) return;
+          options.push(`${qty} ${unit} ${ingredient.name}`);
+        });
+      });
+      return options;
+    }
+
+    function findMatches(query) {
+      const q = query.trim().toLowerCase();
+      if (!q) return purchaseOptions.slice(0, 20);
+      return purchaseOptions
+        .filter(option => option.toLowerCase().includes(q))
+        .slice(0, 20);
+    }
+
+    function renderSuggestions(matches) {
+      const list = document.getElementById('purchase-suggestions');
+      list.innerHTML = '';
+      if (!matches.length) {
+        list.style.display = 'none';
+        return;
+      }
+      matches.forEach(option => {
+        const row = document.createElement('button');
+        row.type = 'button';
+        row.className = 'suggestion-item';
+        row.textContent = option;
+        row.onclick = () => selectSuggestion(option);
+        list.appendChild(row);
+      });
+      list.style.display = 'block';
+    }
+
+    function selectSuggestion(option) {
+      const input = document.getElementById('purchase-search');
+      input.value = option;
+      selectedOption = option;
+      addItem();
+    }
+
+    function renderNewItemUnits(selected = '') {
+      const sel = document.getElementById('new-item-unit');
+      const units = allUnits();
+      sel.innerHTML = units
+        .map(u => `<option value="${escapeHtml(u)}" ${u === selected ? 'selected' : ''}>${escapeHtml(u)}</option>`)
+        .join('');
+    }
+
+    function showNewItemPanel(name) {
+      pendingNewIngredient = capitalizeIngredientName(name);
+      document.getElementById('new-item-name').textContent = name;
+      document.getElementById('new-item-qty').value = '';
+      if (newItemSaveTimer) {
+        clearTimeout(newItemSaveTimer);
+        newItemSaveTimer = null;
+      }
+      renderNewItemUnits();
+      document.getElementById('new-item-panel').style.display = 'block';
+      renderSuggestions([]);
+    }
+
+    function cancelNewItemPanel() {
+      if (newItemSaveTimer) {
+        clearTimeout(newItemSaveTimer);
+        newItemSaveTimer = null;
+      }
+      pendingNewIngredient = '';
+      document.getElementById('new-item-panel').style.display = 'none';
+    }
+
+    function scheduleSaveNewItemOption(delay = 500) {
+      if (!pendingNewIngredient) return;
+      if (newItemSaveTimer) clearTimeout(newItemSaveTimer);
+      newItemSaveTimer = setTimeout(() => {
+        newItemSaveTimer = null;
+        saveNewItemOption();
+      }, delay);
+    }
+
+    async function saveNewItemOption() {
+      if (!pendingNewIngredient) return;
+      const qty = document.getElementById('new-item-qty').value.trim();
+      const unit = document.getElementById('new-item-unit').value;
+      if (!qty || !unit) return;
+
+      const ingredientName = pendingNewIngredient;
+      const ingredients = await AppStore.getIngredients();
+      const existing = ingredients.find(i => i.name.toLowerCase() === ingredientName.toLowerCase());
+
+      const mergedUnits = Array.from(new Set([
+        ...(existing?.units || []),
+        unit,
+      ]));
+
+      const mergedPurchaseQuantities = [...(existing?.purchaseQuantities || [])];
+      const newKey = `${qty}|${unit}`;
+      const hasNew = mergedPurchaseQuantities.some(pq => `${pq.qty}|${pq.unit}` === newKey);
+      if (!hasNew) {
+        mergedPurchaseQuantities.push({ qty, unit });
+      }
+
+      await AppStore.saveIngredientDef(ingredientName, {
+        units: mergedUnits,
+        purchaseQuantities: mergedPurchaseQuantities,
+      });
+
+      const itemText = `${qty} ${unit} ${ingredientName}`;
+      items.push({ text: itemText, checked: false });
+      await saveToServer();
+
+      if (!purchaseOptions.includes(itemText)) purchaseOptions.push(itemText);
+      document.getElementById('purchase-search').value = '';
+      selectedOption = '';
+      cancelNewItemPanel();
+      render();
+    }
+
+    async function saveToServer() {
+      await AppStore.setShopping(items);
+    }
+
+    function render() {
+      const list = document.getElementById('shop-list');
+      list.innerHTML = '';
+
+      if (items.length === 0) {
+        list.innerHTML = `
+          <div class="empty">
+            <span class="empty-icon">🛒</span>
+            <p>Your list is empty.<br/>Add some items above!</p>
+          </div>`;
+        return;
+      }
+
+      items.forEach((item, i) => {
+        const div = document.createElement('div');
+        div.className = `card-item shop-item${item.checked ? ' checked' : ''}`;
+        div.innerHTML = `
+          <div class="check" onclick="toggle(${i})">${item.checked ? '✓' : ''}</div>
+          <span class="item-text" onclick="toggle(${i})">${escapeHtml(item.text)}</span>
+          <button class="delete-btn" onclick="deleteItem(${i})">✕</button>`;
+        list.appendChild(div);
+      });
+    }
+
+    function addItem() {
+      const input = document.getElementById('purchase-search');
+      const raw = input.value.trim();
+      const exact = purchaseOptions.find(o => o.toLowerCase() === raw.toLowerCase());
+      const text = selectedOption || exact || '';
+      if (!raw) return;
+      if (!text) {
+        showNewItemPanel(capitalizeIngredientName(raw));
+        return;
+      }
+      items.push({ text, checked: false });
+      saveToServer();
+      input.value = '';
+      selectedOption = '';
+      renderSuggestions([]);
+      render();
+    }
+
+    function toggle(i) {
+      items[i].checked = !items[i].checked;
+      saveToServer();
+      render();
+    }
+
+    function deleteItem(i) {
+      items.splice(i, 1);
+      saveToServer();
+      render();
+    }
+
+    function clearChecked() {
+      items = items.filter(it => !it.checked);
+      saveToServer();
+      render();
+    }
+
+    function escapeHtml(str) {
+      return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    function capitalizeIngredientName(name) {
+      const trimmed = String(name || '').trim();
+      if (!trimmed) return '';
+      return trimmed
+        .toLowerCase()
+        .split(/\s+/)
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' ');
+    }
+
+    function renderRecipeSuggestions(matches) {
+      const list = document.getElementById('recipe-suggestions');
+      list.innerHTML = '';
+      if (!matches.length) {
+        list.style.display = 'none';
+        return;
+      }
+      matches.forEach(recipe => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'suggestion-item';
+        btn.textContent = recipe.name;
+        btn.onclick = () => selectRecipeSuggestion(recipe);
+        list.appendChild(btn);
+      });
+      list.style.display = 'block';
+    }
+
+    function selectRecipeSuggestion(recipe) {
+      const input = document.getElementById('recipe-search');
+      if (input) input.value = recipe.name;
+      selectedRecipe = recipe;
+      renderRecipeSuggestions([]);
+      addRecipeItems();
+    }
+
+    function showRecipeList() {
+      renderRecipeSuggestions(recipes);
+    }
+
+    function findBestPurchaseOption(recipeQty, recipeUnit, ingredientName) {
+      return selectPurchaseItems(recipeQty, recipeUnit, ingredientName)[0] || null;
+    }
+
+    function addRecipeItems() {
+      if (!selectedRecipe) return;
+
+      const ingredients = Array.isArray(selectedRecipe.ingredients) ? selectedRecipe.ingredients : [];
+      let itemsChanged = 0;
+
+      ingredients.forEach(ing => {
+        if (upsertIngredientItems(ing.qty, ing.unit, ing.name)) itemsChanged++;
+      });
+
+      if (itemsChanged > 0) {
+        saveToServer();
+        selectedRecipe = '';
+        renderRecipeSuggestions([]);
+        render();
+      }
+    }
+
+    document.getElementById('purchase-search').addEventListener('input', e => {
+      selectedOption = '';
+      renderSuggestions(findMatches(e.target.value));
+    });
+
+    document.getElementById('purchase-search').addEventListener('keydown', e => {
+      if (e.key === 'Enter') addItem();
+    });
+
+    document.getElementById('new-item-qty').addEventListener('keydown', e => {
+      if (e.key === 'Enter') saveNewItemOption();
+    });
+
+    document.getElementById('new-item-qty').addEventListener('input', () => {
+      scheduleSaveNewItemOption();
+    });
+
+    document.getElementById('new-item-unit').addEventListener('change', () => {
+      scheduleSaveNewItemOption(0);
+    });
+
+    document.addEventListener('click', e => {
+      const suggestions = document.getElementById('purchase-suggestions');
+      const search = document.getElementById('purchase-search');
+      if (!suggestions.contains(e.target) && e.target !== search) {
+        suggestions.style.display = 'none';
+      }
+      const recipeSuggestions = document.getElementById('recipe-suggestions');
+      const addRecipeBtn = document.querySelector('.add-recipe-btn');
+      if (!recipeSuggestions.contains(e.target) && e.target !== addRecipeBtn) {
+        recipeSuggestions.style.display = 'none';
+      }
+    });
+
+    window.addEventListener('focus', refreshPurchaseOptions);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') refreshPurchaseOptions();
+    });
+
+    loadFromServer();
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js');
+    }
+  </script>
+</body>
+</html>

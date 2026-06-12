@@ -1,0 +1,120 @@
+{
+  "recipes": [
+    {
+      "ingredients": [
+        {
+          "name": "Chicken Mince",
+          "qty": "500",
+          "unit": "grams"
+        },
+        {
+          "name": "Salt",
+          "qty": "0.25",
+          "unit": "grams"
+        },
+        {
+          "name": "Eggs",
+          "qty": "2",
+          "unit": "items"
+        }
+      ],
+      "name": "Chicken burgers",
+      "steps": ""
+    },
+    {
+      "ingredients": [
+        {
+          "qty": "650",
+          "unit": "grams",
+          "name": "Chicken Breast"
+        }
+      ],
+      "name": "Chicken, Bacon & Leek Pie",
+      "steps": ""
+    }
+  ],
+  "shopping": [
+    {
+      "text": "1 kg Chicken Mince",
+      "checked": false
+    },
+    {
+      "text": "1 kg Chicken Mince",
+      "checked": false
+    },
+    {
+      "text": "500 grams Salt",
+      "checked": false
+    },
+    {
+      "text": "12 items Eggs",
+      "checked": false
+    },
+    {
+      "text": "6 items Eggs",
+      "checked": false
+    },
+    {
+      "text": "6 items Eggs",
+      "checked": false
+    }
+  ],
+  "customUnits": [
+    "kg"
+  ],
+  "ingredientDefs": {
+    "chicken mince": {
+      "units": [
+        "grams"
+      ],
+      "purchaseQuantities": [
+        {
+          "qty": "500",
+          "unit": "grams"
+        },
+        {
+          "qty": "1",
+          "unit": "kg"
+        }
+      ]
+    },
+    "salt": {
+      "units": [
+        "grams"
+      ],
+      "purchaseQuantities": [
+        {
+          "qty": "500",
+          "unit": "grams"
+        }
+      ]
+    },
+    "eggs": {
+      "units": [
+        "items"
+      ],
+      "purchaseQuantities": [
+        {
+          "qty": "6",
+          "unit": "items"
+        },
+        {
+          "qty": "12",
+          "unit": "items"
+        }
+      ]
+    },
+    "chicken breast": {
+      "displayName": "Chicken Breast",
+      "units": [
+        "grams"
+      ],
+      "purchaseQuantities": [
+        {
+          "qty": "650",
+          "unit": "grams"
+        }
+      ]
+    }
+  }
+}
