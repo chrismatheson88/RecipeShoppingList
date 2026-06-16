@@ -71,8 +71,6 @@
       for (let i = 0; i < recipes.length; i++) {
         const r = recipes[i];
         const ingredients = Array.isArray(r.ingredients) ? r.ingredients : [];
-        const cost = await AppStore.calculateRecipeCost(r);
-        const costDisplay = cost > 0 ? `<span class="recipe-cost">£${cost.toFixed(2)}</span>` : '';
         
         const card = document.createElement('div');
         card.className = 'recipe-card';
@@ -80,7 +78,6 @@
           <div class="recipe-header" onclick="toggleRecipe(${i})">
             <span class="recipe-emoji">${randomEmoji(i)}</span>
             <span class="recipe-name">${escapeHtml(r.name)}</span>
-            ${costDisplay}
             <button class="delete-btn" onclick="deleteRecipe(event,${i})">🗑</button>
             <span class="recipe-toggle">⌄</span>
           </div>
@@ -94,6 +91,24 @@
             <textarea id="steps-${i}" placeholder="e.g. 1. Preheat oven to 180°C…" oninput="scheduleRecipeSave(${i})">${escapeHtml(r.steps || '')}</textarea>
           </div>`;
         list.appendChild(card);
+      }
+
+      // Calculate costs asynchronously without blocking render
+      for (let i = 0; i < recipes.length; i++) {
+        const r = recipes[i];
+        try {
+          const cost = await AppStore.calculateRecipeCost(r);
+          if (cost > 0) {
+            const headers = document.querySelectorAll('.recipe-card');
+            const header = headers[i].querySelector('.recipe-header');
+            const costSpan = document.createElement('span');
+            costSpan.className = 'recipe-cost';
+            costSpan.textContent = `£${cost.toFixed(2)}`;
+            header.insertBefore(costSpan, header.querySelector('.delete-btn'));
+          }
+        } catch (err) {
+          console.error(`Error calculating cost for ${r.name}:`, err);
+        }
       }
     }
 
