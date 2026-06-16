@@ -586,7 +586,20 @@
           });
         }
 
-        const msg = `✅ Updated ${updated} product${updated !== 1 ? 's' : ''}${failed > 0 ? ` (${failed} failed)` : ''}`;
+        // Save data to data.json via backend
+        setStatus('💾 Saving to data.json...');
+        const exportedData = await AppStore.exportData();
+        const saveResp = await fetch('/api/save-data', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(exportedData)
+        });
+
+        if (!saveResp.ok) {
+          throw new Error(`Failed to save: ${saveResp.statusText}`);
+        }
+
+        const msg = `✅ Updated ${updated} product${updated !== 1 ? 's' : ''}${failed > 0 ? ` (${failed} failed)` : ''} — Saved to data.json!`;
         setStatus(msg);
         setTimeout(() => location.reload(), 1500);
       } catch (err) {

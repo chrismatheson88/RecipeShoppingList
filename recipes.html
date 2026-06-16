@@ -319,6 +319,35 @@
       collectIngredients(i);
       recipes[i].steps = document.getElementById(`steps-${i}`).value;
       await saveToServer();
+      await updateRecipeCost(i);
+    }
+
+    async function updateRecipeCost(i) {
+      const r = recipes[i];
+      if (!r) return;
+      
+      try {
+        const cost = await AppStore.calculateRecipeCost(r);
+        const cards = document.querySelectorAll('.recipe-card');
+        const card = cards[i];
+        if (!card) return;
+        
+        const header = card.querySelector('.recipe-header');
+        let costSpan = header.querySelector('.recipe-cost');
+        
+        if (cost > 0) {
+          if (!costSpan) {
+            costSpan = document.createElement('span');
+            costSpan.className = 'recipe-cost';
+            header.insertBefore(costSpan, header.querySelector('.delete-btn'));
+          }
+          costSpan.textContent = `£${cost.toFixed(2)}`;
+        } else if (costSpan) {
+          costSpan.remove();
+        }
+      } catch (err) {
+        console.error(`Error updating cost for ${r.name}:`, err);
+      }
     }
 
     function scheduleRecipeSave(i, delay = 350) {

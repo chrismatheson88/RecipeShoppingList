@@ -333,46 +333,74 @@
       const data = await getData();
       const defs = data.ingredientDefs || {};
       let totalCost = 0;
+      
+      console.log(`Calculating cost for "${recipe.name}"`, recipe.ingredients);
+      console.log('Available ingredient defs:', Object.keys(defs));
 
       for (const ing of recipe.ingredients) {
-        if (!ing.qty || !ing.unit || !ing.name) continue;
+        if (!ing.qty || !ing.unit || !ing.name) {
+          console.log(`Skipping ingredient - missing field:`, ing);
+          continue;
+        }
 
         const ingKey = ing.name.toLowerCase();
         const def = defs[ingKey];
-        if (!def || !def.purchaseQuantities || def.purchaseQuantities.length === 0) continue;
+        console.log(`Looking up "${ing.name}" as key "${ingKey}":`, def ? 'found' : 'NOT FOUND');
+        
+        if (!def || !def.purchaseQuantities || def.purchaseQuantities.length === 0) {
+          console.log(`No purchase quantities for "${ing.name}"`);
+          continue;
+        }
 
         const recipeComparable = toComparableQuantity(ing.qty, ing.unit);
-        if (!recipeComparable) continue;
+        console.log(`Recipe amount: ${ing.qty} ${ing.unit} =`, recipeComparable);
+        
+        if (!recipeComparable) {
+          console.log(`Failed to convert quantity for ${ing.name}`);
+          continue;
+        }
 
         let bestCostPerUnit = Infinity;
 
         // Find the best price per unit from available purchase quantities
         for (const pq of def.purchaseQuantities) {
-          if (!pq.tescoPrice || pq.tescoPrice <= 0) continue;
+          if (!pq.tescoPrice || pq.tescoPrice <= 0) {
+            console.log(`Skipping pq with no price:`, pq);
+            continue;
+          }
 
           const pqComparable = toComparableQuantity(pq.qty, pq.unit);
-          if (!pqComparable) continue;
+          if (!pqComparable) {
+            console.log(`Failed to convert pq quantity:`, pq);
+            continue;
+          }
+
+          console.log(`  Purchase option: ${pq.qty} ${pq.unit} (${pq.tescoTitle}) @ £${pq.tescoPrice}`, pqComparable);
 
           // Only compare within same family (mass, count, volume)
           if (pqComparable.family !== recipeComparable.family) {
             // Try mass equivalent for volume-to-mass conversion
             if (recipeComparable.family === 'mass' && pqComparable.massEquivalent) {
               const costPerGram = pq.tescoPrice / pqComparable.massEquivalent;
+              console.log(`    Cross-family (mass from volume): £${costPerGram.toFixed(4)}/gram`);
               bestCostPerUnit = Math.min(bestCostPerUnit, costPerGram);
             }
             continue;
           }
 
           const costPerUnit = pq.tescoPrice / pqComparable.quantity;
+          console.log(`    Same family: £${costPerUnit.toFixed(4)}/${pqComparable.unit}`);
           bestCostPerUnit = Math.min(bestCostPerUnit, costPerUnit);
         }
 
         if (isFinite(bestCostPerUnit)) {
           const ingredientCost = recipeComparable.quantity * bestCostPerUnit;
+          console.log(`  Cost for ${ing.name}: ${recipeComparable.quantity} * £${bestCostPerUnit.toFixed(4)} = £${ingredientCost.toFixed(2)}`);
           totalCost += ingredientCost;
         }
       }
 
+      console.log(`Total cost for "${recipe.name}": £${totalCost.toFixed(2)}`);
       return totalCost;
     },
   };

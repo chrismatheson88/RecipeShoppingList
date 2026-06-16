@@ -225,6 +225,24 @@ def put_shopping():
     return jsonify({'ok': True})
 
 
+@app.route('/api/save-data', methods=['POST'])
+def save_data_endpoint():
+    """Save the entire data structure to data.json."""
+    body = request.get_json()
+    if not isinstance(body, dict):
+        return jsonify({'error': 'Expected an object'}), 400
+    
+    # Validate basic structure
+    if 'recipes' not in body or 'ingredientDefs' not in body:
+        return jsonify({'error': 'Missing required fields: recipes, ingredientDefs'}), 400
+    
+    try:
+        write_data(body)
+        return jsonify({'ok': True, 'message': 'Data saved to data.json'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 # ── Static files ──────────────────────────────────────────────────────────────
 
 @app.route('/', defaults={'path': 'index.html'})
