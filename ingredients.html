@@ -548,10 +548,10 @@
         let updated = 0;
         let failed = 0;
 
-        for (const [name, def] of Object.entries(ingredients)) {
-          if (!def.purchaseQuantities) continue;
+        for (const ingredient of ingredients) {
+          if (!ingredient.purchaseQuantities || ingredient.purchaseQuantities.length === 0) continue;
 
-          for (const pq of def.purchaseQuantities) {
+          for (const pq of ingredient.purchaseQuantities) {
             if (!pq.tescoProductID) continue;
 
             try {
@@ -578,9 +578,14 @@
               failed++;
             }
           }
+
+          // Save this ingredient's definition with updated Tesco data
+          await AppStore.saveIngredientDef(ingredient.name, {
+            units: ingredient.units,
+            purchaseQuantities: ingredient.purchaseQuantities,
+          });
         }
 
-        await AppStore.setIngredients(ingredients);
         const msg = `✅ Updated ${updated} product${updated !== 1 ? 's' : ''}${failed > 0 ? ` (${failed} failed)` : ''}`;
         setStatus(msg);
         setTimeout(() => location.reload(), 1500);
