@@ -70,11 +70,17 @@
       "purchaseQuantities": [
         {
           "qty": "500",
-          "unit": "grams"
+          "unit": "grams",
+          "tescoProductID": "308104406",
+          "tescoTitle": "Tesco Chicken Mince 5% Fat 500G",
+          "tescoPrice": 2.59
         },
         {
           "qty": "1",
-          "unit": "kg"
+          "unit": "kg",
+          "tescoProductID": "",
+          "tescoTitle": "",
+          "tescoPrice": null
         }
       ]
     },
@@ -85,7 +91,10 @@
       "purchaseQuantities": [
         {
           "qty": "500",
-          "unit": "grams"
+          "unit": "grams",
+          "tescoProductID": "",
+          "tescoTitle": "",
+          "tescoPrice": null
         }
       ]
     },
@@ -96,11 +105,17 @@
       "purchaseQuantities": [
         {
           "qty": "6",
-          "unit": "items"
+          "unit": "items",
+          "tescoProductID": "",
+          "tescoTitle": "",
+          "tescoPrice": null
         },
         {
           "qty": "12",
-          "unit": "items"
+          "unit": "items",
+          "tescoProductID": "",
+          "tescoTitle": "",
+          "tescoPrice": null
         }
       ]
     },
@@ -112,7 +127,10 @@
       "purchaseQuantities": [
         {
           "qty": "650",
-          "unit": "grams"
+          "unit": "grams",
+          "tescoProductID": "",
+          "tescoTitle": "",
+          "tescoPrice": null
         }
       ]
     }

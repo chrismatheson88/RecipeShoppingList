@@ -23,16 +23,27 @@
   }
 
   function dedupePurchaseQuantities(rows) {
-    const seen = new Set();
+    const seen = new Map();
     const out = [];
     (rows || []).forEach(row => {
       const qty = String((row || {}).qty || '').trim();
       const unit = String((row || {}).unit || '').trim();
+      const tescoProductID = String((row || {}).tescoProductID || '').trim();
+      const tescoTitle = String((row || {}).tescoTitle || '').trim();
+      const tescoPrice = (row || {}).tescoPrice;
       if (!qty || !unit) return;
       const key = `${qty}|${unit}`;
-      if (seen.has(key)) return;
-      seen.add(key);
-      out.push({ qty, unit });
+      if (seen.has(key)) {
+        const existingIndex = seen.get(key);
+        if (!out[existingIndex].tescoProductID && tescoProductID) {
+          out[existingIndex].tescoProductID = tescoProductID;
+          out[existingIndex].tescoTitle = tescoTitle;
+          out[existingIndex].tescoPrice = tescoPrice;
+        }
+        return;
+      }
+      seen.set(key, out.length);
+      out.push({ qty, unit, tescoProductID, tescoTitle, tescoPrice });
     });
     return out;
   }

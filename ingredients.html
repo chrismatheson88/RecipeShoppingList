@@ -90,11 +90,12 @@
     .pq-list { display: flex; flex-direction: column; gap: 8px; }
     .pq-row {
       display: grid;
-      grid-template-columns: 80px 1fr auto;
+      grid-template-columns: 80px 1fr 130px auto;
       gap: 6px;
       align-items: center;
     }
     .pq-row input[type=number],
+    .pq-row input[type=text],
     .pq-row select {
       padding: 9px 10px;
       border: 2px solid #E0E0E0;
@@ -107,6 +108,22 @@
     }
     .pq-row input:focus,
     .pq-row select:focus { border-color: var(--purple, #7E57C2); }
+
+    .pq-tesco-info {
+      grid-column: 1 / -1;
+      font-size: 13px;
+      color: var(--muted);
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .pq-tesco-title {
+      font-weight: 600;
+    }
+    .pq-tesco-price {
+      color: var(--green);
+      font-weight: 700;
+    }
 
     .add-pq-btn {
       background: none;
@@ -169,6 +186,46 @@
       background: var(--card);
     }
     .idef-name-input:focus { border-color: var(--purple, #7E57C2); }
+    
+    /* Refresh button */
+    .refresh-btn {
+      background: #2196F3;
+      color: white;
+      border: none;
+      border-radius: var(--radius);
+      padding: 12px 16px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      width: 100%;
+      transition: background 0.2s;
+    }
+    .refresh-btn:hover { background: #1976D2; }
+    .refresh-btn:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+    #refresh-status {
+      margin-top: 1rem;
+      padding: 12px 16px;
+      border-radius: var(--radius);
+      font-size: 14px;
+      font-weight: 600;
+      display: none;
+    }
+    #refresh-status.show {
+      display: block;
+    }
+    #refresh-status.success {
+      background: #E8F5E9;
+      color: #2E7D32;
+      border-left: 4px solid #4CAF50;
+    }
+    #refresh-status.error {
+      background: #FFEBEE;
+      color: #C62828;
+      border-left: 4px solid #F44336;
+    }
   </style>
 </head>
 <body>
@@ -190,6 +247,8 @@
     <div class="filter-row">
       <input id="search" type="text" placeholder="Search ingredients…" oninput="renderFiltered()" />
     </div>
+    <button class="refresh-btn" onclick="refreshTescoData()">🔄 Refresh Tesco Data</button>
+    <div id="refresh-status"></div>
     <div class="card-list" id="ing-list"></div>
   </main>
 
@@ -330,14 +389,18 @@
     }
 
     function pqRow(i, j, pq, units) {
-      pq = pq || { qty: '', unit: units[0] || '' };
+      pq = pq || { qty: '', unit: units[0] || '', tescoProductID: '', tescoTitle: '', tescoPrice: null };
       const opts = units.length
         ? units.map(u => `<option value="${u}" ${pq.unit === u ? 'selected' : ''}>${u}</option>`).join('')
         : `<option value="${pq.unit}">${pq.unit || '—'}</option>`;
+      const hasTescoData = pq.tescoTitle || pq.tescoPrice;
+      const tescoInfo = hasTescoData ? `<div class="pq-tesco-info">${pq.tescoTitle ? `<div class="pq-tesco-title">${escapeHtml(pq.tescoTitle)}</div>` : ''}${pq.tescoPrice ? `<div class="pq-tesco-price">£${pq.tescoPrice.toFixed(2)}</div>` : ''}</div>` : '';
       return `<div class="pq-row" id="pq-${i}-${j}">
         <input type="number" min="0" step="any" placeholder="Qty" class="pq-qty" value="${escapeHtml(String(pq.qty || ''))}" oninput="scheduleSaveDef(${i})" />
         <select class="pq-unit" onchange="scheduleSaveDef(${i})">${opts}</select>
+        <input type="text" placeholder="Tesco product ID" class="pq-tesco-id" value="${escapeHtml(String(pq.tescoProductID || ''))}" oninput="scheduleSaveDef(${i})" />
         <button class="delete-btn" onclick="deletePqRow(${i},${j})">✕</button>
+        ${tescoInfo}
       </div>`;
     }
 
@@ -377,16 +440,23 @@
     }
 
     function collectPqRows(i) {
-      return Array.from(document.querySelectorAll(`#pq-list-${i} .pq-row`)).map(row => ({
-        qty: row.querySelector('.pq-qty').value,
-        unit: row.querySelector('.pq-unit').value,
-      }));
+      return Array.from(document.querySelectorAll(`#pq-list-${i} .pq-row`)).map(row => {
+        const pqRow = row.querySelector('.pq-qty');
+        if (!pqRow) return null;
+        return {
+          qty: row.querySelector('.pq-qty').value,
+          unit: row.querySelector('.pq-unit').value,
+          tescoProductID: row.querySelector('.pq-tesco-id').value.trim(),
+          tescoTitle: row.querySelector('.pq-tesco-title')?.textContent || '',
+          tescoPrice: row.querySelector('.pq-tesco-price') ? parseFloat(row.querySelector('.pq-tesco-price').textContent.replace('£', '')) : null,
+        };
+      }).filter(Boolean);
     }
 
     function addPqRow(i) {
       const units = getSelectedUnits(i);
       const pqs = collectPqRows(i);
-      pqs.push({ qty: '', unit: units[0] || '' });
+      pqs.push({ qty: '', unit: units[0] || '', tescoProductID: '', tescoTitle: '', tescoPrice: null });
       const container = document.getElementById(`pq-list-${i}`);
       container.innerHTML = pqs.map((pq, j) => pqRow(i, j, pq, units)).join('');
       scheduleSaveDef(i);
@@ -459,6 +529,65 @@
         .split(/\s+/)
         .map(word => word.charAt(0).toUpperCase() + word.slice(1))
         .join(' ');
+    }
+
+    async function refreshTescoData() {
+      const btn = document.querySelector('.refresh-btn');
+      const status = document.getElementById('refresh-status');
+      btn.disabled = true;
+
+      const setStatus = (msg, isError = false) => {
+        status.textContent = msg;
+        status.className = `show ${isError ? 'error' : 'success'}`;
+      };
+
+      try {
+        setStatus('⏳ Fetching Tesco data...');
+        const ingredients = await AppStore.getIngredients();
+        const apiKey = 'af2dcf2533msh2024c4cc4aa3832p10de4djsnc73c8ffcadbd';
+        let updated = 0;
+        let failed = 0;
+
+        for (const [name, def] of Object.entries(ingredients)) {
+          if (!def.purchaseQuantities) continue;
+
+          for (const pq of def.purchaseQuantities) {
+            if (!pq.tescoProductID) continue;
+
+            try {
+              const url = `https://tesco-data-api.p.rapidapi.com/product-details?productId=${pq.tescoProductID}`;
+              const resp = await fetch(url, {
+                headers: {
+                  'accept': 'application/json',
+                  'x-rapidapi-key': apiKey,
+                  'x-rapidapi-host': 'tesco-data-api.p.rapidapi.com'
+                }
+              });
+
+              if (!resp.ok) throw new Error(`API returned ${resp.status}`);
+              const data = await resp.json();
+
+              if (data.success && data.data?.results?.[0]?.data?.product) {
+                const product = data.data.results[0].data.product;
+                pq.tescoTitle = product.title || '';
+                pq.tescoPrice = product.price?.actual || null;
+                updated++;
+              }
+            } catch (err) {
+              console.error(`Failed to fetch ${pq.tescoProductID}:`, err);
+              failed++;
+            }
+          }
+        }
+
+        await AppStore.setIngredients(ingredients);
+        const msg = `✅ Updated ${updated} product${updated !== 1 ? 's' : ''}${failed > 0 ? ` (${failed} failed)` : ''}`;
+        setStatus(msg);
+        setTimeout(() => location.reload(), 1500);
+      } catch (err) {
+        setStatus(`❌ Error: ${err.message}`, true);
+        btn.disabled = false;
+      }
     }
 
     loadAll();
