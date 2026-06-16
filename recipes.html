@@ -48,7 +48,7 @@
       defs.forEach(d => {
         if (d.units && d.units.length) ingredientDefs[d.name.toLowerCase()] = d.units;
       });
-      render();
+      await render();
     }
 
     async function saveToServer() {
@@ -101,21 +101,21 @@
       document.querySelectorAll('.recipe-card')[i].classList.toggle('open');
     }
 
-    function addRecipe() {
+    async function addRecipe() {
       const input = document.getElementById('recipe-input');
       const name = input.value.trim();
       if (!name) return;
       recipes.push({ name, ingredients: [], steps: '' });
-      saveToServer();
+      await saveToServer();
       input.value = '';
-      render();
+      await render();
     }
 
-    function deleteRecipe(e, i) {
+    async function deleteRecipe(e, i) {
       e.stopPropagation();
       recipes.splice(i, 1);
-      saveToServer();
-      render();
+      await saveToServer();
+      await render();
     }
 
     function unitsForIngredient(name) {
@@ -285,20 +285,20 @@
       }
     }
 
-    function addIngredientRow(i) {
+    async function addIngredientRow(i) {
       collectIngredients(i);
       recipes[i].ingredients.push({ qty: '', unit: 'grams', name: '' });
-      saveToServer();
-      render();
+      await saveToServer();
+      await render();
       document.querySelectorAll('.recipe-card')[i].classList.add('open');
       beginEditIngredient(i, recipes[i].ingredients.length - 1);
     }
 
-    function deleteIngredientRow(i, j) {
+    async function deleteIngredientRow(i, j) {
       collectIngredients(i);
       recipes[i].ingredients.splice(j, 1);
-      saveToServer();
-      render();
+      await saveToServer();
+      await render();
       document.querySelectorAll('.recipe-card')[i].classList.add('open');
     }
 
