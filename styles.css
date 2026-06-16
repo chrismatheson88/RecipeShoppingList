@@ -447,6 +447,16 @@ header h1 {
   flex: 1;
 }
 
+.recipe-card .recipe-cost {
+  font-size: 15px;
+  font-weight: 700;
+  color: #2E7D32;
+  background: #E8F5E9;
+  padding: 4px 8px;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
 .recipe-card .recipe-toggle {
   font-size: 20px;
   color: var(--muted);

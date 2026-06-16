@@ -62,6 +62,68 @@
     };
   }
 
+  function normalizeUnit(unit) {
+    const normalized = String(unit || '').trim().toLowerCase();
+    const aliases = {
+      g: 'grams',
+      gram: 'grams',
+      grams: 'grams',
+      kg: 'kg',
+      kilogram: 'kg',
+      kilograms: 'kg',
+      item: 'items',
+      items: 'items',
+      slice: 'slices',
+      slices: 'slices',
+      tsp: 'tsp',
+      teaspoon: 'tsp',
+      teaspoons: 'tsp',
+      tbsp: 'tbsp',
+      tablespoon: 'tbsp',
+      tablespoons: 'tbsp',
+      cup: 'cups',
+      cups: 'cups',
+    };
+    return aliases[normalized] || normalized;
+  }
+
+  function toComparableQuantity(qty, unit) {
+    const amount = parseFloat(qty);
+    const normalizedUnit = normalizeUnit(unit);
+    if (!Number.isFinite(amount)) return null;
+
+    const conversions = {
+      grams: { family: 'mass', factor: 1, gramEquivalent: 1 },
+      kg: { family: 'mass', factor: 1000, gramEquivalent: 1000 },
+      items: { family: 'count', factor: 1 },
+      slices: { family: 'count', factor: 1 },
+      tsp: { family: 'volume', factor: 1, gramEquivalent: 5 },
+      tbsp: { family: 'volume', factor: 3, gramEquivalent: 15 },
+      cups: { family: 'volume', factor: 16, gramEquivalent: 240 },
+    };
+
+    const conversion = conversions[normalizedUnit];
+    if (!conversion) {
+      return {
+        family: `raw:${normalizedUnit}`,
+        quantity: amount,
+        unit: normalizedUnit,
+      };
+    }
+
+    const comparable = {
+      family: conversion.family,
+      quantity: amount * conversion.factor,
+      unit: normalizedUnit,
+    };
+
+    if (conversion.gramEquivalent && conversion.family === 'volume') {
+      comparable.massEquivalent = amount * conversion.gramEquivalent;
+    }
+
+    return comparable;
+  }
+
   function saveData(data) {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizeData(data)));
   }
@@ -263,6 +325,55 @@
 
     async importData(data) {
       saveData(normalizeData(data));
+    },
+
+    async calculateRecipeCost(recipe) {
+      if (!recipe || !recipe.ingredients) return 0;
+
+      const data = await getData();
+      const defs = data.ingredientDefs || {};
+      let totalCost = 0;
+
+      for (const ing of recipe.ingredients) {
+        if (!ing.qty || !ing.unit || !ing.name) continue;
+
+        const ingKey = ing.name.toLowerCase();
+        const def = defs[ingKey];
+        if (!def || !def.purchaseQuantities || def.purchaseQuantities.length === 0) continue;
+
+        const recipeComparable = toComparableQuantity(ing.qty, ing.unit);
+        if (!recipeComparable) continue;
+
+        let bestCostPerUnit = Infinity;
+
+        // Find the best price per unit from available purchase quantities
+        for (const pq of def.purchaseQuantities) {
+          if (!pq.tescoPrice || pq.tescoPrice <= 0) continue;
+
+          const pqComparable = toComparableQuantity(pq.qty, pq.unit);
+          if (!pqComparable) continue;
+
+          // Only compare within same family (mass, count, volume)
+          if (pqComparable.family !== recipeComparable.family) {
+            // Try mass equivalent for volume-to-mass conversion
+            if (recipeComparable.family === 'mass' && pqComparable.massEquivalent) {
+              const costPerGram = pq.tescoPrice / pqComparable.massEquivalent;
+              bestCostPerUnit = Math.min(bestCostPerUnit, costPerGram);
+            }
+            continue;
+          }
+
+          const costPerUnit = pq.tescoPrice / pqComparable.quantity;
+          bestCostPerUnit = Math.min(bestCostPerUnit, costPerUnit);
+        }
+
+        if (isFinite(bestCostPerUnit)) {
+          const ingredientCost = recipeComparable.quantity * bestCostPerUnit;
+          totalCost += ingredientCost;
+        }
+      }
+
+      return totalCost;
     },
   };
 
