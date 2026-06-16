@@ -383,6 +383,27 @@
     });
 
     loadFromServer();
+    
+    // Recalculate costs when page becomes visible (after navigating back)
+    document.addEventListener('visibilitychange', async () => {
+      if (document.visibilityState === 'visible') {
+        console.log('Page became visible, recalculating recipe costs...');
+        for (let i = 0; i < recipes.length; i++) {
+          await updateRecipeCost(i);
+        }
+      }
+    });
+
+    // Also handle pageshow event for back-forward cache
+    window.addEventListener('pageshow', async (e) => {
+      if (e.persisted) {
+        console.log('Page restored from back-forward cache, recalculating recipe costs...');
+        for (let i = 0; i < recipes.length; i++) {
+          await updateRecipeCost(i);
+        }
+      }
+    });
+
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('sw.js');
       }
